@@ -41,6 +41,8 @@ textarea{min-height:70px}
 <div id="msg"></div>
 
 <section id="s-add" class="on">
+  <label>Collector name</label>
+  <input id="collector" placeholder="Your name (saved on this phone)">
   <label>Point type</label>
   <div class="seg" id="typeSeg">
     <button data-v="Blockage" class="on">Blockage</button>
@@ -109,6 +111,10 @@ textarea{min-height:70px}
 const $=id=>document.getElementById(id);
 const msg=t=>{const m=$('msg');m.textContent=t;m.style.display='block';setTimeout(()=>m.style.display='none',2500)};
 
+// ---------- collector ----------
+try{$('collector').value=localStorage.getItem('rf_collector')||''}catch(e){}
+$('collector').oninput=()=>{try{localStorage.setItem('rf_collector',$('collector').value.trim())}catch(e){}};
+
 // ---------- DB ----------
 let db;
 const req=indexedDB.open('riverfield',1);
@@ -167,12 +173,14 @@ $('photo').onchange=async e=>{
 let editId=null;
 $('save').onclick=async()=>{
   const name=$('name').value.trim(),lat=parseFloat($('lat').value),lon=parseFloat($('lon').value);
+  const col=$('collector').value.trim();
+  if(!col)return msg('Enter collector name');
   if(!name)return msg('Enter a name');
   if(isNaN(lat)||isNaN(lon))return msg('No coordinates yet');
   const rec={type:val('typeSeg'),name,status:val('statSeg'),cause:val('typeSeg')==='Blockage'?$('cause').value:'',
     notes:$('notes').value.trim(),q:$('q').value,unit:$('unit').value,method:$('method').value,
-    lat,lon,acc:fix?+fix.acc.toFixed(1):'',time:new Date().toISOString(),photo:photoBlob};
-  if(editId){rec.id=editId;const old=(await all()).find(x=>x.id===editId);rec.time=old.time;if(!photoBlob)rec.photo=old.photo}
+    collector:col,lat,lon,acc:fix?+fix.acc.toFixed(1):'',time:new Date().toISOString(),photo:photoBlob};
+  if(editId){rec.id=editId;const old=(await all()).find(x=>x.id===editId);rec.time=old.time;rec.collector=old.collector||col;if(!photoBlob)rec.photo=old.photo}
   await put(rec);msg('Saved ✔');resetForm();
 };
 function resetForm(){
@@ -227,23 +235,25 @@ $('clearAll').onclick=async()=>{
 // ---------- export ----------
 const esc=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
 const slug=s=>s.replace(/[^a-z0-9]+/gi,'_').slice(0,30);
-const pname=r=>r.photo?`photos/${r.id}_${slug(r.name)}.jpg`:'';
+const uid=r=>slug(r.collector||'na')+'_'+r.id;
+const pname=r=>r.photo?`photos/${uid(r)}_${slug(r.name)}.jpg`:'';
+const who=()=>slug($('collector').value.trim()||'na');
 function csv(a){
-  const h=['id','type','name','status','cause','explanation','discharge','unit','method','latitude','longitude','gps_accuracy_m','time','photo'];
-  return [h.join(',')].concat(a.map(r=>[r.id,r.type,r.name,r.status,r.cause,r.notes,r.q,r.unit,r.method,r.lat,r.lon,r.acc,r.time,pname(r)].map(esc).join(','))).join('\n');
+  const h=['uid','collector','id','type','name','status','cause','explanation','discharge','unit','method','latitude','longitude','gps_accuracy_m','time','photo'];
+  return [h.join(',')].concat(a.map(r=>[uid(r),r.collector,r.id,r.type,r.name,r.status,r.cause,r.notes,r.q,r.unit,r.method,r.lat,r.lon,r.acc,r.time,pname(r)].map(esc).join(','))).join('\n');
 }
 function geojson(a){
   return JSON.stringify({type:'FeatureCollection',features:a.map(r=>({type:'Feature',geometry:{type:'Point',coordinates:[r.lon,r.lat]},
-    properties:{id:r.id,type:r.type,name:r.name,status:r.status,cause:r.cause,explanation:r.notes,discharge:r.q===''?null:+r.q,unit:r.unit,method:r.method,gps_accuracy_m:r.acc,time:r.time,photo:pname(r)}}))},null,1);
+    properties:{uid:uid(r),collector:r.collector,id:r.id,type:r.type,name:r.name,status:r.status,cause:r.cause,explanation:r.notes,discharge:r.q===''?null:+r.q,unit:r.unit,method:r.method,gps_accuracy_m:r.acc,time:r.time,photo:pname(r)}}))},null,1);
 }
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove()}
 const stamp=()=>new Date().toISOString().slice(0,10);
-$('exCsv').onclick=async()=>{const a=await all();if(!a.length)return msg('No data');dl(new Blob([csv(a)],{type:'text/csv'}),'river_points_'+stamp()+'.csv')};
+$('exCsv').onclick=async()=>{const a=await all();if(!a.length)return msg('No data');dl(new Blob([csv(a)],{type:'text/csv'}),'river_points_'+who()+'_'+stamp()+'.csv')};
 $('exZip').onclick=async()=>{
   const a=await all();if(!a.length)return msg('No data');
   const enc=new TextEncoder(),files=[{name:'points.csv',data:enc.encode(csv(a))},{name:'points.geojson',data:enc.encode(geojson(a))}];
   for(const r of a)if(r.photo)files.push({name:pname(r),data:new Uint8Array(await r.photo.arrayBuffer())});
-  dl(zip(files),'river_survey_'+stamp()+'.zip');msg('ZIP exported');
+  dl(zip(files),'river_survey_'+who()+'_'+stamp()+'.zip');msg('ZIP exported');
 };
 // store-only ZIP writer
 const crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
