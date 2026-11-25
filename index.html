@@ -88,6 +88,7 @@ textarea{min-height:70px}
 
 <section id="s-list">
   <div id="count" style="font-size:13px;margin-bottom:8px"></div>
+  <button class="btn del" id="clearAll" style="margin:0 0 12px">Clear all records</button>
   <div id="list"></div>
 </section>
 
@@ -131,15 +132,20 @@ const setSeg=(id,v)=>document.querySelectorAll('#'+id+' button').forEach(b=>b.cl
 
 // ---------- GPS ----------
 let fix=null,wid=null;
-function startGPS(){
+function startGPS(high=true){
   if(!navigator.geolocation){$('gps').textContent='GPS not supported';return}
   if(wid!==null)navigator.geolocation.clearWatch(wid);
-  fix=null;$('gps').textContent='Getting GPS…';
+  if(high)fix=null;
+  $('gps').textContent=high?'Getting GPS…':'Trying network location…';
   wid=navigator.geolocation.watchPosition(p=>{
     if(!fix||p.coords.accuracy<=fix.acc){fix={lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}}
     $('gps').innerHTML='GPS accuracy: <b>±'+p.coords.accuracy.toFixed(1)+' m</b> (best ±'+fix.acc.toFixed(1)+' m)';
     if(!editId||$('lat').dataset.auto==='1'){$('lat').value=fix.lat.toFixed(6);$('lon').value=fix.lon.toFixed(6);$('lat').dataset.auto='1'}
-  },e=>{$('gps').textContent='GPS error: '+e.message+' (you can type coordinates)'},{enableHighAccuracy:true,maximumAge:0,timeout:30000});
+  },e=>{
+    if(e.code===1){$('gps').textContent='Location blocked. Allow it in Chrome site settings.';return}
+    $('gps').textContent='GPS slow, retrying… (move to open sky)';
+    setTimeout(()=>startGPS(!high),1500);
+  },{enableHighAccuracy:high,maximumAge:15000,timeout:high?45000:20000});
 }
 $('regps').onclick=()=>{$('lat').dataset.auto='1';startGPS()};
 ['lat','lon'].forEach(i=>$(i).oninput=()=>{$('lat').dataset.auto='0'});
@@ -209,6 +215,14 @@ function edit(r){
   $('delBtn').style.display='block';
 }
 const _reset=resetForm;resetForm=function(){_reset();if($('delBtn'))$('delBtn').style.display='none'};
+
+$('clearAll').onclick=async()=>{
+  const n=(await all()).length;if(!n)return msg('Nothing to clear');
+  if(!confirm('Delete ALL '+n+' points? Export the ZIP first!'))return;
+  if(!confirm('Really delete everything? This cannot be undone.'))return;
+  await new Promise(r=>{tx('readwrite').clear().onsuccess=()=>r()});
+  msg('All records cleared');render();
+};
 
 // ---------- export ----------
 const esc=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
